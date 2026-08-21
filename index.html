@@ -6,13 +6,15 @@
 <title>Gestão de Escalas - Nuvem</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body class="bg-gray-100 p-4 md:p-8">
-<div class="max-w-6xl mx-auto bg-white p-6 rounded shadow">
+<div id="conteudoParaPDF" class="max-w-6xl mx-auto bg-white p-6 rounded shadow">
 <h1 class="text-2xl font-bold mb-6 text-gray-800">Gerenciador de Escalas</h1>
-<div class="flex flex-col md:flex-row gap-4 mb-6">
+<div class="flex flex-col md:flex-row gap-4 mb-6 print:hidden">
 <input type="date" id="dataEscala" class="border p-2 rounded w-full md:w-auto" onchange="mudarData()">
 <button onclick="liberarColagem()" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition">Carregar / Visualizar</button>
+<button onclick="gerarPDF()" class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 transition">Compartilhar Escala (PDF)</button>
 </div>
 <div id="areaColagem" class="hidden border-t pt-6 mb-6">
 <h2 class="font-semibold mb-2">Cole os dados copiados da planilha aqui:</h2>
@@ -42,6 +44,17 @@ if (!supabaseClient && window.supabase) supabaseClient = window.supabase.createC
 return supabaseClient;
 }
 let voosGlobais = [];
+function gerarPDF() {
+const element = document.getElementById('conteudoParaPDF');
+const opt = {
+margin: 1,
+filename: `Escala_${document.getElementById('dataEscala').value || 'Data'}.pdf`,
+image: { type: 'jpeg', quality: 0.98 },
+html2canvas: { scale: 2 },
+jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+};
+html2pdf().set(opt).from(element).save();
+}
 async function mudarData() {
 const dataSel = document.getElementById('dataEscala').value;
 document.getElementById('areaColagem').classList.add('hidden');
@@ -160,18 +173,15 @@ document.querySelectorAll('.celula').forEach(cel => {
 let div = cel.querySelector('div'), input = cel.querySelector('input');
 let voo = cel.getAttribute('data-v');
 let campoAtual = cel.getAttribute('data-c');
-
 div.addEventListener('click', async () => {
 let listaTrincas = window.listaTrincasDia || [];
 let opcoesTxt = listaTrincas.map((t, i) => `${i + 1} - R:${t.rampa} | E1:${t.emb_1} | E2:${t.emb_2}`).join('\n');
 let msg = "Digite o número da trinca ou escreva o NOME LIVRE que deseja:";
 if (opcoesTxt) msg += "\n\nTrincas usadas:\n" + opcoesTxt;
-
 let escolha = prompt(msg);
-if (escolha === null) return; // Cancelou
+if (escolha === null) return;
 escolha = escolha.trim();
 if (!escolha) return;
-
 const sb = getSupabase();
 const dataSel = document.getElementById('dataEscala').value;
 let linha = cel.closest('tr');
@@ -180,40 +190,25 @@ let emb1Val = linha.querySelector('[data-c="emb_1"] input').value || linha.query
 let emb2Val = linha.querySelector('[data-c="emb_2"] input').value || linha.querySelector('[data-c="emb_2"] div').textContent;
 if(rampaVal === "Clique para preencher") rampaVal = "";
 if(emb1Val === "Clique para preencher") emb1Val = "";
-if(emb2Val === "Emb para preencher") emb2Val = "";
 if(emb2Val === "Clique para preencher") emb2Val = "";
-
-// Se digitou um número válido da lista, aplica a trinca inteira
 if (!isNaN(escolha) && escolha > 0 && escolha <= listaTrincas.length) {
 let t = listaTrincas[escolha - 1];
 rampaVal = t.rampa;
 emb1Val = t.emb_1;
 emb2Val = t.emb_2;
 } else {
-// Se digitou um nome livre, altera apenas o campo que foi clicado
 if (campoAtual === 'rampa') rampaVal = escolha;
 if (campoAtual === 'emb_1') emb1Val = escolha;
 if (campoAtual === 'emb_2') emb2Val = escolha;
 }
-
-if (sb) {
-await sb.from('escala_operacional').upsert({ 
-data_escala: dataSel, 
-voo_saida: voo, 
-rampa: rampaVal, 
-emb_1: emb1Val, 
-emb_2: emb2Val 
-}, { onConflict: 'data_escala,voo_saida' });
-}
+if (sb) await sb.from('escala_operacional').upsert({ data_escala: dataSel, voo_saida: voo, rampa: rampaVal, emb_1: emb1Val, emb_2: emb2Val }, { onConflict: 'data_escala,voo_saida' });
 renderizarTabela();
 });
-
 div.addEventListener('dblclick', () => {
 div.classList.add('hidden');
 input.classList.remove('hidden');
 input.focus();
 });
-
 let salvar = async () => {
 let val = input.value.trim();
 const sb = getSupabase();
@@ -228,15 +223,7 @@ if(emb2Val === "Clique para preencher") emb2Val = "";
 if (campoAtual === 'rampa') rampaVal = val;
 if (campoAtual === 'emb_1') emb1Val = val;
 if (campoAtual === 'emb_2') emb2Val = val;
-if (sb) {
-await sb.from('escala_operacional').upsert({ 
-data_escala: dataSel, 
-voo_saida: voo, 
-rampa: rampaVal, 
-emb_1: emb1Val, 
-emb_2: emb2Val 
-}, { onConflict: 'data_escala,voo_saida' });
-}
+if (sb) await sb.from('escala_operacional').upsert({ data_escala: dataSel, voo_saida: voo, rampa: rampaVal, emb_1: emb1Val, emb_2: emb2Val }, { onConflict: 'data_escala,voo_saida' });
 renderizarTabela();
 };
 input.addEventListener('blur', salvar);
