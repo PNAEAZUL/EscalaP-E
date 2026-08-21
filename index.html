@@ -159,33 +159,63 @@ function ativarEdicao() {
 document.querySelectorAll('.celula').forEach(cel => {
 let div = cel.querySelector('div'), input = cel.querySelector('input');
 let voo = cel.getAttribute('data-v');
-let timer;
-div.addEventListener('click', () => {
-timer = setTimeout(async () => {
-if (window.listaTrincasDia && window.listaTrincasDia.length > 0) {
-let opcoes = window.listaTrincasDia.map((t, i) => `${i + 1} - R:${t.rampa}|E1:${t.emb_1}|E2:${t.emb_2}`).join('\n');
-let escolha = prompt(`Escolha a trinca ou cancele para digitar manualmente:\n\n${opcoes}`);
-if (escolha !== null && !isNaN(escolha) && escolha.trim() !== "") {
-let t = window.listaTrincasDia[escolha - 1];
-if (t) {
+let campoAtual = cel.getAttribute('data-c');
+
+div.addEventListener('click', async () => {
+let listaTrincas = window.listaTrincasDia || [];
+let opcoesTxt = listaTrincas.map((t, i) => `${i + 1} - R:${t.rampa} | E1:${t.emb_1} | E2:${t.emb_2}`).join('\n');
+let msg = "Digite o número da trinca ou escreva o NOME LIVRE que deseja:";
+if (opcoesTxt) msg += "\n\nTrincas usadas:\n" + opcoesTxt;
+
+let escolha = prompt(msg);
+if (escolha === null) return; // Cancelou
+escolha = escolha.trim();
+if (!escolha) return;
+
 const sb = getSupabase();
 const dataSel = document.getElementById('dataEscala').value;
-if (sb) await sb.from('escala_operacional').upsert({ data_escala: dataSel, voo_saida: voo, rampa: t.rampa, emb_1: t.emb_1, emb_2: t.emb_2 }, { onConflict: 'data_escala,voo_saida' });
+let linha = cel.closest('tr');
+let rampaVal = linha.querySelector('[data-c="rampa"] input').value || linha.querySelector('[data-c="rampa"] div').textContent;
+let emb1Val = linha.querySelector('[data-c="emb_1"] input').value || linha.querySelector('[data-c="emb_1"] div').textContent;
+let emb2Val = linha.querySelector('[data-c="emb_2"] input').value || linha.querySelector('[data-c="emb_2"] div').textContent;
+if(rampaVal === "Clique para preencher") rampaVal = "";
+if(emb1Val === "Clique para preencher") emb1Val = "";
+if(emb2Val === "Emb para preencher") emb2Val = "";
+if(emb2Val === "Clique para preencher") emb2Val = "";
+
+// Se digitou um número válido da lista, aplica a trinca inteira
+if (!isNaN(escolha) && escolha > 0 && escolha <= listaTrincas.length) {
+let t = listaTrincas[escolha - 1];
+rampaVal = t.rampa;
+emb1Val = t.emb_1;
+emb2Val = t.emb_2;
+} else {
+// Se digitou um nome livre, altera apenas o campo que foi clicado
+if (campoAtual === 'rampa') rampaVal = escolha;
+if (campoAtual === 'emb_1') emb1Val = escolha;
+if (campoAtual === 'emb_2') emb2Val = escolha;
+}
+
+if (sb) {
+await sb.from('escala_operacional').upsert({ 
+data_escala: dataSel, 
+voo_saida: voo, 
+rampa: rampaVal, 
+emb_1: emb1Val, 
+emb_2: emb2Val 
+}, { onConflict: 'data_escala,voo_saida' });
+}
 renderizarTabela();
-}
-}
-}
-}, 250);
 });
+
 div.addEventListener('dblclick', () => {
-clearTimeout(timer);
 div.classList.add('hidden');
 input.classList.remove('hidden');
 input.focus();
 });
+
 let salvar = async () => {
 let val = input.value.trim();
-let campo = cel.getAttribute('data-c');
 const sb = getSupabase();
 const dataSel = document.getElementById('dataEscala').value;
 let linha = cel.closest('tr');
@@ -195,10 +225,18 @@ let emb2Val = linha.querySelector('[data-c="emb_2"] input').value || linha.query
 if(rampaVal === "Clique para preencher") rampaVal = "";
 if(emb1Val === "Clique para preencher") emb1Val = "";
 if(emb2Val === "Clique para preencher") emb2Val = "";
-if (campo === 'rampa') rampaVal = val;
-if (campo === 'emb_1') emb1Val = val;
-if (campo === 'emb_2') emb2Val = val;
-if (sb) await sb.from('escala_operacional').upsert({ data_escala: dataSel, voo_saida: voo, rampa: rampaVal, emb_1: emb1Val, emb_2: emb2Val }, { onConflict: 'data_escala,voo_saida' });
+if (campoAtual === 'rampa') rampaVal = val;
+if (campoAtual === 'emb_1') emb1Val = val;
+if (campoAtual === 'emb_2') emb2Val = val;
+if (sb) {
+await sb.from('escala_operacional').upsert({ 
+data_escala: dataSel, 
+voo_saida: voo, 
+rampa: rampaVal, 
+emb_1: emb1Val, 
+emb_2: emb2Val 
+}, { onConflict: 'data_escala,voo_saida' });
+}
 renderizarTabela();
 };
 input.addEventListener('blur', salvar);
