@@ -12,7 +12,7 @@
   body { background: white; padding: 0; }
     .print\:hidden { display: none !important; }
       #conteudoParaPDF { box-shadow: none; padding: 0; max-width: 100%; }
-        tr { page-break-inside: avoid; break-inside: avoid; }
+        tr { page-break-inside: avoid; }
         }
         </style>
         </head>
@@ -141,7 +141,9 @@
         chegadas.sort((a, b) => a.horario.localeCompare(b.horario));
         const listaFinal = [];
         saidas.forEach(s => {
+        // Procura primeiro com a regra normal (chegada antes da saída)
         let validos = chegadas.filter(ch => ch.pref === s.pref && ch.horario <= s.std);
+        // Se não achar estritamente antes, pega qualquer chegada disponível do mesmo prefixo para evitar HANGAR falso
         if (validos.length === 0) {
         validos = chegadas.filter(ch => ch.pref === s.pref);
         }
@@ -302,4 +304,3 @@
         </script>
         </body>
         </html>
-        
