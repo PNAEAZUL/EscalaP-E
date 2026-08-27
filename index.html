@@ -114,7 +114,15 @@
         if (c.length >= 10 && (c[0]?.startsWith("PR-") || c[0]?.startsWith("PS-"))) {
         let pCheg = c[0].trim(), vCheg = c[1]?.trim() || "";
         let eta = "--:--";
-        for (let i = 2; i < 9; i++) { if (ehHora(c[i])) { eta = c[i].trim(); break; } }
+        let horasEncontradas = [];
+        for (let i = 2; i < 9; i++) {
+        if (ehHora(c[i])) horasEncontradas.push(c[i].trim());
+        }
+        if (horasEncontradas.length >= 2) {
+        eta = horasEncontradas[1];
+        } else if (horasEncontradas.length === 1) {
+        eta = horasEncontradas[0];
+        }
         if (pCheg && vCheg) chegadas.push({ pref: pCheg, voo: `${pCheg} ${vCheg}`, horario: eta });
         let pSaid = "", vSaid = "", idxSaid = -1;
         for (let i = 8; i < c.length; i++) {
