@@ -7,229 +7,288 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-</head>
-<body class="bg-gray-100 p-4 md:p-8">
-<div id="conteudoParaPDF" class="max-w-6xl mx-auto bg-white p-6 rounded shadow">
-<h1 class="text-2xl font-bold mb-6 text-gray-800">Gerenciador de Escalas</h1>
-<div class="flex flex-col md:flex-row gap-4 mb-6 print:hidden">
-<input type="date" id="dataEscala" class="border p-2 rounded w-full md:w-auto" onchange="mudarData()">
-<button onclick="liberarColagem()" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition">Carregar / Visualizar</button>
-<button onclick="gerarPDF()" class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 transition">Compartilhar Escala (PDF)</button>
-</div>
-<div id="areaColagem" class="hidden border-t pt-6 mb-6">
-<h2 class="font-semibold mb-2">Cole os dados copiados da planilha aqui:</h2>
-<textarea id="textoIsa" class="w-full h-32 border p-2 rounded mb-4 text-xs font-mono" placeholder="Cole aqui..."></textarea>
-<button onclick="processarSalvarIsa()" class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition">Processar e Salvar Escala</button>
-</div>
-<div class="overflow-x-auto mt-6">
-<table class="w-full border-collapse text-sm">
-<thead>
-<tr class="bg-gray-200">
-<th class="border p-2">Voo Chegada</th><th class="border p-2">ETA</th><th class="border p-2">Voo Saída</th>
-<th class="border p-2">STD</th><th class="border p-2">Rampa</th><th class="border p-2">Emb 1</th><th class="border p-2">Emb 2</th>
-</tr>
-</thead>
-<tbody id="tabelaVoos">
-<tr><td colspan="7" class="text-center p-4 text-gray-500">Selecione a data e clique em Carregar / Visualizar.</td></tr>
-</tbody>
-</table>
-</div>
-</div>
-<script>
-const SUPABASE_URL = 'https://dzfamogbogonwxgdpvbl.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_50Zeo1eoWIT7SJxvfA2W7A_N4Ls46kO';
-let supabaseClient = null;
-function getSupabase() {
-if (!supabaseClient && window.supabase) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-return supabaseClient;
-}
-let voosGlobais = [];
-function gerarPDF() {
-const element = document.getElementById('conteudoParaPDF');
-const opt = {
-margin: 1,
-filename: `Escala_${document.getElementById('dataEscala').value || 'Data'}.pdf`,
-image: { type: 'jpeg', quality: 0.98 },
-html2canvas: { scale: 2 },
-jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-};
-html2pdf().set(opt).from(element).save();
-}
-async function mudarData() {
-const dataSel = document.getElementById('dataEscala').value;
-document.getElementById('areaColagem').classList.add('hidden');
-const sb = getSupabase();
-let malhaSalva = null;
-if (sb) {
-const { data } = await sb.from('malha_isa').select('texto_bruto').eq('data_escala', dataSel).maybeSingle();
-if (data) malhaSalva = data.texto_bruto;
-} else {
-malhaSalva = localStorage.getItem(`malha_${dataSel}`);
-}
-if (malhaSalva) {
-document.getElementById('textoIsa').value = malhaSalva;
-processarTextoIsa(malhaSalva, false);
-} else {
-document.getElementById('textoIsa').value = "";
-voosGlobais = [];
-document.getElementById('tabelaVoos').innerHTML = `<tr><td colspan="7" class="text-center p-4 text-gray-500">Nenhuma malha.</td></tr>`;
-}
-}
-function liberarColagem() {
-if (!document.getElementById('dataEscala').value) return alert("Selecione uma data primeiro.");
-document.getElementById('areaColagem').classList.remove('hidden');
-}
-function ehHora(t) { return t && /^\d{2}:\d{2}$/.test(t.trim()); }
-async function processarSalvarIsa() {
-const texto = document.getElementById('textoIsa').value;
-if (!texto) return alert("Cole os dados primeiro!");
-const dataSel = document.getElementById('dataEscala').value;
-const sb = getSupabase();
-if (sb) await sb.from('malha_isa').upsert({ data_escala: dataSel, texto_bruto: texto }, { onConflict: 'data_escala' });
-else localStorage.setItem(`malha_${dataSel}`, texto);
-processarTextoIsa(texto, true);
-}
-function processarTextoIsa(texto, mostrarAlerta = true) {
-const linhas = texto.split('\n');
-const chegadas = [], saidas = [];
-linhas.forEach(l => {
-if (!l.trim()) return;
-const c = l.split('\t');
-if (c.length >= 10 && (c[0]?.startsWith("PR-") || c[0]?.startsWith("PS-"))) {
-let pCheg = c[0].trim(), vCheg = c[1]?.trim() || "";
-let eta = "--:--";
-for (let i = 2; i < 9; i++) { if (ehHora(c[i])) { eta = c[i].trim(); break; } }
-if (pCheg && vCheg) chegadas.push({ pref: pCheg, voo: `${pCheg} ${vCheg}`, horario: eta });
-let pSaid = "", vSaid = "", idxSaid = -1;
-for (let i = 8; i < c.length; i++) {
-let val = c[i]?.trim() || "";
-if (val.startsWith("PR-") || val.startsWith("PS-")) {
-pSaid = val; vSaid = c[i+1]?.trim() || ""; idxSaid = i; break;
-}
-}
-let std = "--:--";
-if (idxSaid !== -1) {
-for (let i = idxSaid + 2; i < c.length; i++) { if (ehHora(c[i])) { std = c[i].trim(); break; } }
-}
-if (pSaid && vSaid) saidas.push({ pref: pSaid, voo: `${pSaid} ${vSaid}`, horario: std });
-}
-});
-chegadas.sort((a, b) => a.horario.localeCompare(b.horario));
-const listaFinal = [];
-saidas.forEach(s => {
-let validos = chegadas.filter(ch => ch.pref === s.pref && ch.horario <= s.horario);
-let chegVoo = "HANGAR", etaVoo = "--:--";
-if (validos.length > 0) {
-let esc = validos[validos.length - 1];
-chegVoo = esc.voo; etaVoo = esc.horario;
-chegadas.splice(chegadas.indexOf(esc), 1);
-}
-listaFinal.push({ chegada: chegVoo, eta: etaVoo, saida: s.voo, std: s.horario });
-});
-listaFinal.sort((a, b) => (a.std === "--:--" ? 1 : b.std === "--:--" ? -1 : a.std.localeCompare(b.std)));
-voosGlobais = listaFinal;
-renderizarTabela();
-if (mostrarAlerta) alert("Escala processada!");
-}
-async function renderizarTabela() {
-const tbody = document.getElementById('tabelaVoos');
-tbody.innerHTML = "";
-const dataSel = document.getElementById('dataEscala').value;
-const sb = getSupabase();
-const mapaOps = {};
-const trincasUnicas = new Map();
-if (sb) {
-const { data: ops } = await sb.from('escala_operacional').select('*').eq('data_escala', dataSel);
-ops?.forEach(item => {
-mapaOps[item.voo_saida] = item;
-if (item.rampa || item.emb_1 || item.emb_2) {
-let chave = `${item.rampa || ''}|${item.emb_1 || ''}|${item.emb_2 || ''}`;
-trincasUnicas.set(chave, { rampa: item.rampa || '', emb_1: item.emb_1 || '', emb_2: item.emb_2 || '' });
-}
-});
-}
-window.listaTrincasDia = Array.from(trincasUnicas.values());
-voosGlobais.forEach((v) => {
-let isH = v.chegada === "HANGAR";
-let dadosVoo = mapaOps[v.saida] || {};
-tbody.innerHTML += `<tr>
-<td class="border p-2 text-center ${isH ? 'font-bold text-amber-600' : 'font-bold'}">${v.chegada}</td>
-<td class="border p-2 text-center">${v.eta}</td>
-<td class="border p-2 text-center font-semibold text-blue-700">${v.saida}</td>
-<td class="border p-2 text-center font-semibold text-green-700">${v.std}</td>
-<td class="border p-2 text-center celula" data-v="${v.saida}" data-c="rampa">${gerarCel(dadosVoo.rampa)}</td>
-<td class="border p-2 text-center celula" data-v="${v.saida}" data-c="emb_1">${gerarCel(dadosVoo.emb_1)}</td>
-<td class="border p-2 text-center celula" data-v="${v.saida}" data-c="emb_2">${gerarCel(dadosVoo.emb_2)}</td>
-</tr>`;
-});
-ativarEdicao();
-}
-function gerarCel(val) {
-if (val) return `<div class="cursor-pointer py-1 px-2 text-gray-800 hover:bg-gray-100 rounded select-none text-center">${val}</div><input type="text" class="border p-1 w-full rounded hidden" value="${val}">`;
-return `<div class="cursor-pointer py-1 px-2 text-gray-400 italic hover:bg-gray-100 rounded select-none text-center">Clique para preencher</div><input type="text" class="border p-1 w-full rounded hidden" value="">`;
-}
-function ativarEdicao() {
-document.querySelectorAll('.celula').forEach(cel => {
-let div = cel.querySelector('div'), input = cel.querySelector('input');
-let voo = cel.getAttribute('data-v');
-let campoAtual = cel.getAttribute('data-c');
-div.addEventListener('click', async () => {
-let listaTrincas = window.listaTrincasDia || [];
-let opcoesTxt = listaTrincas.map((t, i) => `${i + 1} - R:${t.rampa} | E1:${t.emb_1} | E2:${t.emb_2}`).join('\n');
-let msg = "Digite o número da trinca ou escreva o NOME LIVRE que deseja:";
-if (opcoesTxt) msg += "\n\nTrincas usadas:\n" + opcoesTxt;
-let escolha = prompt(msg);
-if (escolha === null) return;
-escolha = escolha.trim();
-if (!escolha) return;
-const sb = getSupabase();
-const dataSel = document.getElementById('dataEscala').value;
-let linha = cel.closest('tr');
-let rampaVal = linha.querySelector('[data-c="rampa"] input').value || linha.querySelector('[data-c="rampa"] div').textContent;
-let emb1Val = linha.querySelector('[data-c="emb_1"] input').value || linha.querySelector('[data-c="emb_1"] div').textContent;
-let emb2Val = linha.querySelector('[data-c="emb_2"] input').value || linha.querySelector('[data-c="emb_2"] div').textContent;
-if(rampaVal === "Clique para preencher") rampaVal = "";
-if(emb1Val === "Clique para preencher") emb1Val = "";
-if(emb2Val === "Clique para preencher") emb2Val = "";
-if (!isNaN(escolha) && escolha > 0 && escolha <= listaTrincas.length) {
-let t = listaTrincas[escolha - 1];
-rampaVal = t.rampa;
-emb1Val = t.emb_1;
-emb2Val = t.emb_2;
-} else {
-if (campoAtual === 'rampa') rampaVal = escolha;
-if (campoAtual === 'emb_1') emb1Val = escolha;
-if (campoAtual === 'emb_2') emb2Val = escolha;
-}
-if (sb) await sb.from('escala_operacional').upsert({ data_escala: dataSel, voo_saida: voo, rampa: rampaVal, emb_1: emb1Val, emb_2: emb2Val }, { onConflict: 'data_escala,voo_saida' });
-renderizarTabela();
-});
-div.addEventListener('dblclick', () => {
-div.classList.add('hidden');
-input.classList.remove('hidden');
-input.focus();
-});
-let salvar = async () => {
-let val = input.value.trim();
-const sb = getSupabase();
-const dataSel = document.getElementById('dataEscala').value;
-let linha = cel.closest('tr');
-let rampaVal = linha.querySelector('[data-c="rampa"] input').value || linha.querySelector('[data-c="rampa"] div').textContent;
-let emb1Val = linha.querySelector('[data-c="emb_1"] input').value || linha.querySelector('[data-c="emb_1"] div').textContent;
-let emb2Val = linha.querySelector('[data-c="emb_2"] input').value || linha.querySelector('[data-c="emb_2"] div').textContent;
-if(rampaVal === "Clique para preencher") rampaVal = "";
-if(emb1Val === "Clique para preencher") emb1Val = "";
-if(emb2Val === "Clique para preencher") emb2Val = "";
-if (campoAtual === 'rampa') rampaVal = val;
-if (campoAtual === 'emb_1') emb1Val = val;
-if (campoAtual === 'emb_2') emb2Val = val;
-if (sb) await sb.from('escala_operacional').upsert({ data_escala: dataSel, voo_saida: voo, rampa: rampaVal, emb_1: emb1Val, emb_2: emb2Val }, { onConflict: 'data_escala,voo_saida' });
-renderizarTabela();
-};
-input.addEventListener('blur', salvar);
-input.addEventListener('keydown', (e) => { if (e.key === 'Enter') salvar(); });
-});
-}
-</script>
-</body>
-</html>
+<style>
+@media print {
+  body { background: white; padding: 0; }
+    .print\:hidden { display: none !important; }
+      #conteudoParaPDF { box-shadow: none; padding: 0; max-width: 100%; }
+        tr { page-break-inside: avoid; }
+        }
+        </style>
+        </head>
+        <body class="bg-gray-100 p-4 md:p-8">
+        <div id="conteudoParaPDF" class="max-w-6xl mx-auto bg-white p-6 rounded shadow">
+        <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Gerenciador de Escalas</h1>
+        <div id="tituloPDFData" class="text-lg font-semibold text-gray-650 hidden print:block"></div>
+        </div>
+        <div class="flex flex-col md:flex-row gap-4 mb-6 print:hidden">
+        <input type="date" id="dataEscala" class="border p-2 rounded w-full md:w-auto" onchange="mudarData()">
+        <button onclick="liberarColagem()" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition">Carregar / Visualizar</button>
+        <button onclick="gerarPDF()" class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 transition">Compartilhar Escala (PDF)</button>
+        </div>
+        <div id="areaColagem" class="hidden border-t pt-6 mb-6 print:hidden">
+        <h2 class="font-semibold mb-2">Cole os dados copiados da planilha aqui:</h2>
+        <textarea id="textoIsa" class="w-full h-32 border p-2 rounded mb-4 text-xs font-mono" placeholder="Cole aqui..."></textarea>
+        <button onclick="processarSalvarIsa()" class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition">Processar e Salvar Escala</button>
+        </div>
+        <div class="overflow-x-auto mt-6">
+        <table class="w-full border-collapse text-sm">
+        <thead>
+        <tr class="bg-gray-200">
+        <th class="border p-2">Voo Chegada</th><th class="border p-2">ETA</th><th class="border p-2">Voo Saída</th>
+        <th class="border p-2">STD</th><th class="border p-2">Rampa</th><th class="border p-2">Emb 1</th><th class="border p-2">Emb 2</th>
+        </tr>
+        </thead>
+        <tbody id="tabelaVoos">
+        <tr><td colspan="7" class="text-center p-4 text-gray-500">Selecione a data e clique em Carregar / Visualizar.</td></tr>
+        </tbody>
+        </table>
+        </div>
+        </div>
+        <script>
+        const SUPABASE_URL = 'https://dzfamogbogonwxgdpvbl.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_50Zeo1eoWIT7SJxvfA2W7A_N4Ls46kO';
+        let supabaseClient = null;
+        function getSupabase() {
+        if (!supabaseClient && window.supabase) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        return supabaseClient;
+        }
+        let voosGlobais = [];
+        function gerarPDF() {
+        const dataVal = document.getElementById('dataEscala').value || 'Data';
+        const tituloPrint = document.getElementById('tituloPDFData');
+        tituloPrint.textContent = `Escala Operacional - Data: ${dataVal}`;
+        const element = document.getElementById('conteudoParaPDF');
+        const opt = {
+        margin: [0.3, 0.3, 0.3, 0.3],
+        filename: `Escala_${dataVal}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+        };
+        html2pdf().set(opt).from(element).save().then(() => {
+        tituloPrint.textContent = '';
+        });
+        }
+        async function mudarData() {
+        const dataSel = document.getElementById('dataEscala').value;
+        document.getElementById('areaColagem').classList.add('hidden');
+        const sb = getSupabase();
+        let malhaSalva = null;
+        if (sb) {
+        const { data } = await sb.from('malha_isa').select('texto_bruto').eq('data_escala', dataSel).maybeSingle();
+        if (data) malhaSalva = data.texto_bruto;
+        } else {
+        malhaSalva = localStorage.getItem(`malha_${dataSel}`);
+        }
+        if (malhaSalva) {
+        document.getElementById('textoIsa').value = malhaSalva;
+        processarTextoIsa(malhaSalva, false);
+        } else {
+        document.getElementById('textoIsa').value = "";
+        voosGlobais = [];
+        document.getElementById('tabelaVoos').innerHTML = `<tr><td colspan="7" class="text-center p-4 text-gray-500">Nenhuma malha.</td></tr>`;
+        }
+        }
+        function liberarColagem() {
+        if (!document.getElementById('dataEscala').value) return alert("Selecione uma data primeiro.");
+        document.getElementById('areaColagem').classList.remove('hidden');
+        }
+        function ehHora(t) { return t && /^\d{2}:\d{2}$/.test(t.trim()); }
+        async function processarSalvarIsa() {
+        const texto = document.getElementById('textoIsa').value;
+        if (!texto) return alert("Cole os dados primeiro!");
+        const dataSel = document.getElementById('dataEscala').value;
+        const sb = getSupabase();
+        if (sb) await sb.from('malha_isa').upsert({ data_escala: dataSel, texto_bruto: texto }, { onConflict: 'data_escala' });
+        else localStorage.setItem(`malha_${dataSel}`, texto);
+        processarTextoIsa(texto, true);
+        }
+        function processarTextoIsa(texto, mostrarAlerta = true) {
+        const linhas = texto.split('\n');
+        const chegadas = [], saidas = [];
+        linhas.forEach(l => {
+        if (!l.trim()) return;
+        const c = l.split('\t');
+        if (c.length >= 10 && (c[0]?.startsWith("PR-") || c[0]?.startsWith("PS-"))) {
+        let pCheg = c[0].trim(), vCheg = c[1]?.trim() || "";
+        let eta = "--:--";
+        for (let i = 2; i < 9; i++) { if (ehHora(c[i])) { eta = c[i].trim(); break; } }
+        if (pCheg && vCheg) chegadas.push({ pref: pCheg, voo: `${pCheg} ${vCheg}`, horario: eta });
+        let pSaid = "", vSaid = "", idxSaid = -1;
+        for (let i = 8; i < c.length; i++) {
+        let val = c[i]?.trim() || "";
+        if (val.startsWith("PR-") || val.startsWith("PS-")) {
+        pSaid = val; vSaid = c[i+1]?.trim() || ""; idxSaid = i; break;
+        }
+        }
+        let std = "--:--";
+        if (idxSaid !== -1) {
+        for (let i = idxSaid + 2; i < c.length; i++) { if (ehHora(c[i])) { std = c[i].trim(); break; } }
+        }
+        if (pSaid && vSaid) saidas.push({ pref: pSaid, voo: `${pSaid} ${vSaid}`, horario: std });
+        }
+        });
+        chegadas.sort((a, b) => a.horario.localeCompare(b.horario));
+        const listaFinal = [];
+        saidas.forEach(s => {
+        let validos = chegadas.filter(ch => ch.pref === s.pref && ch.horario <= s.horario);
+        let chegVoo = "HANGAR", etaVoo = "--:--";
+        if (validos.length > 0) {
+        let esc = validos[validos.length - 1];
+        chegVoo = esc.voo; etaVoo = esc.horario;
+        chegadas.splice(chegadas.indexOf(esc), 1);
+        }
+        listaFinal.push({ chegada: chegVoo, eta: etaVoo, saida: s.voo, std: s.horario });
+        });
+        listaFinal.sort((a, b) => (a.std === "--:--" ? 1 : b.std === "--:--" ? -1 : a.std.localeCompare(b.std)));
+        voosGlobais = listaFinal;
+        renderizarTabela();
+        if (mostrarAlerta) alert("Escala processada!");
+        }
+        function converterMinutos(horaStr) {
+        if (!horaStr || horaStr === "--:--") return -1;
+        const partes = horaStr.split(':');
+        if (partes.length !== 2) return -1;
+        return parseInt(partes[0]) * 60 + parseInt(partes[1]);
+        }
+        async function renderizarTabela() {
+        const tbody = document.getElementById('tabelaVoos');
+        tbody.innerHTML = "";
+        const dataSel = document.getElementById('dataEscala').value;
+        const sb = getSupabase();
+        const mapaOps = {};
+        const trincasUnicas = new Map();
+        if (sb) {
+        const { data: ops } = await sb.from('escala_operacional').select('*').eq('data_escala', dataSel);
+        ops?.forEach(item => {
+        mapaOps[item.voo_saida] = item;
+        if (item.rampa || item.emb_1 || item.emb_2) {
+        let chave = `${item.rampa || ''}|${item.emb_1 || ''}|${item.emb_2 || ''}`;
+        trincasUnicas.set(chave, { rampa: item.rampa || '', emb_1: item.emb_1 || '', emb_2: item.emb_2 || '' });
+        }
+        });
+        }
+        window.listaTrincasDia = Array.from(trincasUnicas.values());
+
+        let conflitosColaboradores = new Set();
+        if (voosGlobais.length > 0) {
+        let alocacoes = voosGlobais.map(v => {
+        let op = mapaOps[v.saida] || {};
+        return {
+        saida: v.saida,
+        stdMin: converterMinutos(v.std),
+        etaMin: converterMinutos(v.eta),
+        membros: [op.rampa, op.emb_1, op.emb_2].filter(m => m && m.trim() !== "")
+        };
+        });
+
+        for (let i = 0; i < alocacoes.length; i++) {
+        for (let j = i + 1; j < alocacoes.length; j++) {
+        let v1 = alocacoes[i];
+        let v2 = alocacoes[j];
+        if (v1.stdMin !== -1 && v2.etaMin !== -1) {
+        let intersecao = v1.membros.filter(m => v2.membros.includes(m));
+        if (intersecao.length > 0 && v1.stdMin > v2.etaMin && v1.stdMin - v2.etaMin < 60) {
+        intersecao.forEach(m => conflitosColaboradores.add(m));
+        }
+        }
+        if (v2.stdMin !== -1 && v1.etaMin !== -1) {
+        let intersecao = v1.membros.filter(m => v2.membros.includes(m));
+        if (intersecao.length > 0 && v2.stdMin > v1.etaMin && v2.stdMin - v1.etaMin < 60) {
+        intersecao.forEach(m => conflitosColaboradores.add(m));
+        }
+        }
+        }
+        }
+        }
+
+        voosGlobais.forEach((v) => {
+        let isH = v.chegada === "HANGAR";
+        let dadosVoo = mapaOps[v.saida] || {};
+        tbody.innerHTML += `<tr>
+        <td class="border p-2 text-center ${isH ? 'font-bold text-amber-600' : 'font-bold'}">${v.chegada}</td>
+        <td class="border p-2 text-center">${v.eta}</td>
+        <td class="border p-2 text-center font-semibold text-blue-700">${v.saida}</td>
+        <td class="border p-2 text-center font-semibold text-green-700">${v.std}</td>
+        <td class="border p-2 text-center celula" data-v="${v.saida}" data-c="rampa">${gerarCel(dadosVoo.rampa, conflitosColaboradores)}</td>
+        <td class="border p-2 text-center celula" data-v="${v.saida}" data-c="emb_1">${gerarCel(dadosVoo.emb_1, conflitosColaboradores)}</td>
+        <td class="border p-2 text-center celula" data-v="${v.saida}" data-c="emb_2">${gerarCel(dadosVoo.emb_2, conflitosColaboradores)}</td>
+        </tr>`;
+        });
+        ativarEdicao();
+        }
+        function gerarCel(val, conflitos) {
+        let temConflito = val && conflitos.has(val);
+        let corClasse = temConflito ? 'text-red-600 font-bold bg-red-50' : (val ? 'text-gray-800' : 'text-gray-400 italic');
+        let textoExibicao = val ? val : 'Clique para preencher';
+        if (temConflito) textoExibicao += ' ⚠️';
+        return `<div class="cursor-pointer py-1 px-2 ${corClasse} hover:bg-gray-100 rounded select-none text-center">${textoExibicao}</div><input type="text" class="border p-1 w-full rounded hidden" value="${val || ""}">`;
+        }
+        function ativarEdicao() {
+        document.querySelectorAll('.celula').forEach(cel => {
+        let div = cel.querySelector('div'), input = cel.querySelector('input');
+        let voo = cel.getAttribute('data-v');
+        let campoAtual = cel.getAttribute('data-c');
+        div.addEventListener('click', async () => {
+        let listaTrincas = window.listaTrincasDia || [];
+        let opcoesTxt = listaTrincas.map((t, i) => `${i + 1} - R:${t.rampa} | E1:${t.emb_1} | E2:${t.emb_2}`).join('\n');
+        let msg = "Digite o número da trinca ou escreva o NOME LIVRE que deseja:";
+        if (opcoesTxt) msg += "\n\nTrincas usadas:\n" + opcoesTxt;
+        let escolha = prompt(msg);
+        if (escolha === null) return;
+        escolha = escolha.trim();
+        if (!escolha) return;
+        const sb = getSupabase();
+        const dataSel = document.getElementById('dataEscala').value;
+        let linha = cel.closest('tr');
+        let rampaVal = linha.querySelector('[data-c="rampa"] input').value || linha.querySelector('[data-c="rampa"] div').textContent.replace(' ⚠️', '');
+        let emb1Val = linha.querySelector('[data-c="emb_1"] input').value || linha.querySelector('[data-c="emb_1"] div').textContent.replace(' ⚠️', '');
+        let emb2Val = linha.querySelector('[data-c="emb_2"] input').value || linha.querySelector('[data-c="emb_2"] div').textContent.replace(' ⚠️', '');
+        if(rampaVal === "Clique para preencher") rampaVal = "";
+        if(emb1Val === "Clique para preencher") emb1Val = "";
+        if(emb2Val === "Clique para preencher") emb2Val = "";
+        if (!isNaN(escolha) && escolha > 0 && escolha <= listaTrincas.length) {
+        let t = listaTrincas[escolha - 1];
+        rampaVal = t.rampa;
+        emb1Val = t.emb_1;
+        emb2Val = t.emb_2;
+        } else {
+        if (campoAtual === 'rampa') rampaVal = escolha;
+        if (campoAtual === 'emb_1') emb1Val = escolha;
+        if (campoAtual === 'emb_2') emb2Val = escolha;
+        }
+        if (sb) await sb.from('escala_operacional').upsert({ data_escala: dataSel, voo_saida: voo, rampa: rampaVal, emb_1: emb1Val, emb_2: emb2Val }, { onConflict: 'data_escala,voo_saida' });
+        renderizarTabela();
+        });
+        div.addEventListener('dblclick', () => {
+        div.classList.add('hidden');
+        input.classList.remove('hidden');
+        input.focus();
+        });
+        let salvar = async () => {
+        let val = input.value.trim();
+        const sb = getSupabase();
+        const dataSel = document.getElementById('dataEscala').value;
+        let linha = cel.closest('tr');
+        let rampaVal = linha.querySelector('[data-c="rampa"] input').value || linha.querySelector('[data-c="rampa"] div').textContent.replace(' ⚠️', '');
+        let emb1Val = linha.querySelector('[data-c="emb_1"] input').value || linha.querySelector('[data-c="emb_1"] div').textContent.replace(' ⚠️', '');
+        let emb2Val = linha.querySelector('[data-c="emb_2"] input').value || linha.querySelector('[data-c="emb_2"] div').textContent.replace(' ⚠️', '');
+        if(rampaVal === "Clique para preencher") rampaVal = "";
+        if(emb1Val === "Clique para preencher") emb1Val = "";
+        if(emb2Val === "Clique para preencher") emb2Val = "";
+        if (campoAtual === 'rampa') rampaVal = val;
+        if (campoAtual === 'emb_1') emb1Val = val;
+        if (campoAtual === 'emb_2') emb2Val = val;
+        if (sb) await sb.from('escala_operacional').upsert({ data_escala: dataSel, voo_saida: voo, rampa: rampaVal, emb_1: emb1Val, emb_2: emb2Val }, { onConflict: 'data_escala,voo_saida' });
+        renderizarTabela();
+        };
+        input.addEventListener('blur', salvar);
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') salvar(); });
+        });
+        }
+        </script>
+        </body>
+        </html>
+        
